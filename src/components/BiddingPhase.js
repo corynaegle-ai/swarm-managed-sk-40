@@ -19,31 +19,37 @@ import { validateBid } from '../utils/gameValidator.js';
  * @param {Player[]} players - Current list of players.
  * @param {number} currentRound - The current round number.
  * @param {object} currentBids - Object mapping playerId to bid for the current round.
+ * @param {string|null} globalError - A global error message for the component.
  * @returns {string} HTML string for the bidding phase component.
  */
-export function BiddingPhase(players, currentRound, currentBids) {
+export function BiddingPhase(players, currentRound, currentBids, globalError) {
     const bidErrors = {};
     let allBidsValid = true;
 
     // Ensure all players have an entry in currentBids, default to 0 if not set
+    // Note: app.js ensures currentBids are initialized, so this loop mainly validates
     players.forEach(player => {
-        if (typeof currentBids[player.id] === 'undefined') {
-            currentBids[player.id] = 0; // Initialize bid to 0 if not present
-        }
-        const error = validateBid(currentBids[player.id], currentRound);
+        const bid = currentBids[player.id]; // Should always be defined as per app.js
+        const error = validateBid(bid, currentRound);
         if (error) {
             bidErrors[player.id] = error;
             allBidsValid = false;
         }
     });
 
+    // Check if the number of bids matches the number of players
+    // This helps catch cases where state might not be fully initialized or out of sync
     if (Object.keys(currentBids).length !== players.length) {
-        allBidsValid = false; // Not all players have bids recorded (initial state)
+        allBidsValid = false;
     }
+
+    // Disable button if any individual bid is invalid or if there's a global error
+    const disableConfirm = !allBidsValid || !!globalError;
 
     return `
         <div class="bidding-phase">
             <h2 class="phase-title">Round ${currentRound}: Bidding</h2>
+            ${globalError ? `<p class="error-message">${globalError}</p>` : ''}
             <p>Each player bids how many tricks they expect to take (0 to ${currentRound}).</p>
 
             <div class="bidding-form">
@@ -51,14 +57,14 @@ export function BiddingPhase(players, currentRound, currentBids) {
                     <div class="player-input-row">
                         <label for="bid-${player.id}">${player.name}:</label>
                         <input type="number" id="bid-${player.id}" min="0" max="${currentRound}"
-                               value="${currentBids[player.id] !== undefined ? currentBids[player.id] : ''}"
+                               value="${currentBids[player.id]}"
                                data-player-id="${player.id}" class="player-bid-input">
                         ${bidErrors[player.id] ? `<span class="error-message">${bidErrors[player.id]}</span>` : ''}
                     </div>
                 `).join('')}
             </div>
 
-            <button id="confirm-bids-btn" ${!allBidsValid ? 'disabled' : ''}>Confirm Bids</button>
+            <button id="confirm-bids-btn" ${disableConfirm ? 'disabled' : ''}>Confirm Bids</button>
         </div>
     `;
 }
@@ -76,8 +82,9 @@ export function attachBiddingPhaseListeners(onBidChange, onBidsSubmitted) {
         biddingForm.addEventListener('input', (event) => {
             if (event.target.classList.contains('player-bid-input')) {
                 const playerId = event.target.dataset.playerId;
+                // Ensure bid is parsed as an integer, default to 0 if empty or invalid input
                 const bid = parseInt(event.target.value, 10);
-                onBidChange(playerId, bid);
+                onBidChange(playerId, isNaN(bid) ? 0 : bid); // Pass 0 if input is not a valid number
             }
         });
     }

@@ -26,9 +26,10 @@ import { validateTricksTaken, validateBonusPoints, validateTotalTricks } from '.
  * @param {object} bidsForRound - Object mapping playerId to bid for the current round.
  * @param {object} currentTricks - Object mapping playerId to tricks taken for the current round.
  * @param {object} currentBonus - Object mapping playerId to bonus points for the current round.
+ * @param {string|null} globalError - A global error message for the component.
  * @returns {string} HTML string for the scoring phase component.
  */
-export function ScoringPhase(players, currentRound, bidsForRound, currentTricks, currentBonus) {
+export function ScoringPhase(players, currentRound, bidsForRound, currentTricks, currentBonus, globalError) {
     const trickErrors = {};
     const bonusErrors = {};
     let allInputsValid = true;
@@ -36,10 +37,12 @@ export function ScoringPhase(players, currentRound, bidsForRound, currentTricks,
 
     const playerTricksArray = [];
 
+    // Check individual player inputs for validity and calculate temporary scores
     players.forEach(player => {
         const bid = bidsForRound[player.id];
-        const tricksTaken = currentTricks[player.id] !== undefined ? currentTricks[player.id] : 0; // Default to 0
-        const bonusPoints = currentBonus[player.id] !== undefined ? currentBonus[player.id] : 0; // Default to 0
+        // Ensure inputs are always numbers for validation, default to 0 if not yet set in currentTricks/Bonus
+        const tricksTaken = currentTricks[player.id] !== undefined ? currentTricks[player.id] : 0;
+        const bonusPoints = currentBonus[player.id] !== undefined ? currentBonus[player.id] : 0;
 
         playerTricksArray.push({ playerId: player.id, tricksTaken });
 
@@ -55,9 +58,12 @@ export function ScoringPhase(players, currentRound, bidsForRound, currentTricks,
             allInputsValid = false;
         }
 
-        // Calculate temporary scores for display
+        // Calculate temporary scores for display *only if inputs are valid for this player*
         if (!trickError && !bonusError) {
+            // Pass bonus points to calculator, but it will only apply them if bid === tricksTaken
             tempScores[player.id] = calculateRoundScore(bid, tricksTaken, bonusPoints, currentRound);
+        } else {
+            tempScores[player.id] = { baseScore: 0, totalRoundScore: 0 }; // Show 0 or similar if invalid
         }
     });
 
@@ -66,15 +72,20 @@ export function ScoringPhase(players, currentRound, bidsForRound, currentTricks,
         allInputsValid = false;
     }
 
+    // Disable button if any individual input is invalid, total tricks is wrong, or there's a global error
+    const disableConfirm = !allInputsValid || !!globalError;
+
     return `
         <div class="scoring-phase">
             <h2 class="phase-title">Round ${currentRound}: Scoring</h2>
+            ${globalError ? `<p class="error-message">${globalError}</p>` : ''}
             <p>Enter tricks taken and bonus points for each player.</p>
             ${totalTricksError ? `<p class="error-message">${totalTricksError}</p>` : ''}
 
             <div class="scoring-form">
                 ${players.map(player => {
                     const bid = bidsForRound[player.id];
+                    // Display empty string for 0 to allow clearer user input, but internal state uses 0
                     const tricks = currentTricks[player.id] !== undefined ? currentTricks[player.id] : '';
                     const bonus = currentBonus[player.id] !== undefined ? currentBonus[player.id] : '';
                     const tempScore = tempScores[player.id];
@@ -85,8 +96,8 @@ export function ScoringPhase(players, currentRound, bidsForRound, currentTricks,
                             <input type="number" class="player-tricks-input" data-player-id="${player.id}"
                                    min="0" max="${currentRound}" value="${tricks}" placeholder="Tricks Taken">
                             <input type="number" class="player-bonus-input" data-player-id="${player.id}"
-                                   min="0" value="${bonus}" placeholder="Bonus Points (0 if not exact)">
-                            ${tempScore ? `<span>Score: ${tempScore.totalRoundScore}</span>` : ''}
+                                   min="0" value="${bonus}" placeholder="Bonus Points">
+                            <span>Score: ${tempScore ? tempScore.totalRoundScore : 0}</span>
                             ${trickErrors[player.id] ? `<span class="error-message">${trickErrors[player.id]}</span>` : ''}
                             ${bonusErrors[player.id] ? `<span class="error-message">${bonusErrors[player.id]}</span>` : ''}
                         </div>
@@ -94,7 +105,7 @@ export function ScoringPhase(players, currentRound, bidsForRound, currentTricks,
                 }).join('')}
             </div>
 
-            <button id="confirm-scores-btn" ${!allInputsValid ? 'disabled' : ''}>Confirm Scores</button>
+            <button id="confirm-scores-btn" ${disableConfirm ? 'disabled' : ''}>Confirm Scores</button>
         </div>
     `;
 }
@@ -114,10 +125,10 @@ export function attachScoringPhaseListeners(onTricksChange, onBonusChange, onSco
             const playerId = event.target.dataset.playerId;
             if (event.target.classList.contains('player-tricks-input')) {
                 const tricksTaken = parseInt(event.target.value, 10);
-                onTricksChange(playerId, tricksTaken);
+                onTricksChange(playerId, isNaN(tricksTaken) ? 0 : tricksTaken); // Pass 0 if not a valid number
             } else if (event.target.classList.contains('player-bonus-input')) {
                 const bonusPoints = parseInt(event.target.value, 10);
-                onBonusChange(playerId, bonusPoints);
+                onBonusChange(playerId, isNaN(bonusPoints) ? 0 : bonusPoints); // Pass 0 if not a valid number
             }
         });
     }
