@@ -7,10 +7,10 @@ import {
     validatePlayerName,
     isUniquePlayerName,
     validatePlayerCount,
-    validateBid, // Added for app-level validation check
-    validateTricksTaken, // Added for app-level validation check
-    validateBonusPoints, // Added for app-level validation check
-    validateTotalTricks // Added for app-level validation check
+    validateBid,
+    validateTricksTaken,
+    validateBonusPoints,
+    validateTotalTricks
 } from './utils/gameValidator.js';
 
 /**
