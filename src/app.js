@@ -3,7 +3,15 @@ import { BiddingPhase, attachBiddingPhaseListeners } from './components/BiddingP
 import { ScoringPhase, attachScoringPhaseListeners } from './components/ScoringPhase.js';
 import { ScoreBoard, attachScoreBoardListeners } from './components/ScoreBoard.js';
 import { calculateRoundScore } from './utils/scoreCalculator.js';
-import { validatePlayerName, isUniquePlayerName, validatePlayerCount } from './utils/gameValidator.js';
+import {
+    validatePlayerName,
+    isUniquePlayerName,
+    validatePlayerCount,
+    validateBid, // Added for app-level validation check
+    validateTricksTaken, // Added for app-level validation check
+    validateBonusPoints, // Added for app-level validation check
+    validateTotalTricks // Added for app-level validation check
+} from './utils/gameValidator.js';
 
 /**
  * @typedef {object} Player
@@ -60,7 +68,20 @@ function saveGameState() {
 function loadGameState() {
     try {
         const storedState = sessionStorage.getItem(STORAGE_KEY);
-        return storedState ? JSON.parse(storedState) : null;
+        // Revive state, ensuring defaults are set for new properties
+        const loadedState = storedState ? JSON.parse(storedState) : null;
+        if (loadedState) {
+            return {
+                ...loadedState,
+                // Ensure globalError is reset on load to prevent sticky errors from previous session
+                globalError: null,
+                // Ensure new properties are initialized if they weren't in old saved state
+                bids: loadedState.bids || {},
+                tricks: loadedState.tricks || {},
+                bonus: loadedState.bonus || {}
+            };
+        }
+        return null;
     } catch (e) {
         console.error("Error loading game state from session storage:", e);
         return null;
@@ -82,6 +103,12 @@ function handleAddPlayer(name) {
         return;
     }
 
+    // Also check player count limit before adding
+    if (gameState.players.length >= 8) {
+        updateGameState({ globalError: 'Cannot add more than 8 players.' });
+        return;
+    }
+
     const newPlayer = {
         id: `player-${Date.now()}`,
         name: name.trim(),
@@ -92,7 +119,12 @@ function handleAddPlayer(name) {
 }
 
 function handleRemovePlayer(playerId) {
-    updateGameState({ players: gameState.players.filter(p => p.id !== playerId) });
+    const updatedPlayers = gameState.players.filter(p => p.id !== playerId);
+    updateGameState({
+        players: updatedPlayers,
+        // Clear any global errors that might become irrelevant (e.g., uniqueness)
+        globalError: null
+    });
 }
 
 function handleUpdatePlayerName(playerId, newName) {
@@ -120,14 +152,14 @@ function handleStartGame() {
 
     // Initialize bids for the first round
     const initialBids = {};
-    gameState.players.forEach(p => initialBids[p.id] = 0);
+    gameState.players.forEach(p => initialBids[p.id] = 0); // Pre-fill with 0
 
     updateGameState({
         phase: 'bidding',
         currentRound: 1,
         bids: initialBids, // Pre-fill bids for current round
-        tricks: {},
-        bonus: {},
+        tricks: {}, // Clear tricks for new phase
+        bonus: {}, // Clear bonus for new phase
         globalError: null
     });
 }
@@ -135,22 +167,25 @@ function handleStartGame() {
 // --- Bidding Phase Callbacks ---
 function handleBidChange(playerId, bid) {
     const newBids = { ...gameState.bids, [playerId]: bid };
-    updateGameState({ bids: newBids });
+    updateGameState({ bids: newBids, globalError: null }); // Clear global error on any change, re-validation will set if needed
 }
 
 function handleBidsSubmitted() {
-    // Re-validate all bids before submitting
+    let currentGlobalError = null;
     let allBidsValid = true;
+
     for (const player of gameState.players) {
         const bid = gameState.bids[player.id];
+        // Check if bid exists and is valid
         if (typeof bid === 'undefined' || validateBid(bid, gameState.currentRound) !== null) {
             allBidsValid = false;
+            currentGlobalError = 'Please ensure all bids are valid (0 to current round).';
             break;
         }
     }
 
     if (!allBidsValid) {
-        updateGameState({ globalError: 'Please ensure all bids are valid (0 to current round).' });
+        updateGameState({ globalError: currentGlobalError });
         return;
     }
 
@@ -173,40 +208,45 @@ function handleBidsSubmitted() {
 // --- Scoring Phase Callbacks ---
 function handleTricksChange(playerId, tricksTaken) {
     const newTricks = { ...gameState.tricks, [playerId]: tricksTaken };
-    updateGameState({ tricks: newTricks });
+    updateGameState({ tricks: newTricks, globalError: null });
 }
 
 function handleBonusChange(playerId, bonusPoints) {
     const newBonus = { ...gameState.bonus, [playerId]: bonusPoints };
-    updateGameState({ bonus: newBonus });
+    updateGameState({ bonus: newBonus, globalError: null });
 }
 
 function handleScoresSubmitted() {
-    const playerTricksArray = gameState.players.map(p => ({
-        playerId: p.id,
-        tricksTaken: gameState.tricks[p.id] !== undefined ? gameState.tricks[p.id] : 0 // Default for validation
-    }));
-
-    const totalTricksError = validateTotalTricks(playerTricksArray, gameState.currentRound);
+    let currentGlobalError = null;
     let inputErrorsPresent = false;
+    const playerTricksArray = [];
 
     // Check individual player inputs for validity
     for (const player of gameState.players) {
         const tricksTaken = gameState.tricks[player.id];
         const bonusPoints = gameState.bonus[player.id];
 
-        if (typeof tricksTaken === 'undefined' || validateTricksTaken(tricksTaken, gameState.currentRound) !== null) {
+        // Ensure tricksTaken and bonusPoints are numbers for validation
+        const safeTricksTaken = typeof tricksTaken === 'number' ? tricksTaken : 0;
+        const safeBonusPoints = typeof bonusPoints === 'number' ? bonusPoints : 0;
+
+        playerTricksArray.push({ playerId: player.id, tricksTaken: safeTricksTaken });
+
+        if (validateTricksTaken(safeTricksTaken, gameState.currentRound) !== null) {
             inputErrorsPresent = true;
             break;
         }
-        if (typeof bonusPoints === 'undefined' || validateBonusPoints(bonusPoints) !== null) {
+        if (validateBonusPoints(safeBonusPoints) !== null) {
             inputErrorsPresent = true;
             break;
         }
     }
 
+    const totalTricksError = validateTotalTricks(playerTricksArray, gameState.currentRound);
+
     if (totalTricksError || inputErrorsPresent) {
-        updateGameState({ globalError: totalTricksError || 'Please ensure all tricks and bonus points are valid.' });
+        currentGlobalError = totalTricksError || 'Please ensure all tricks and bonus points are valid.';
+        updateGameState({ globalError: currentGlobalError });
         return;
     }
 
@@ -244,9 +284,9 @@ function handleScoresSubmitted() {
         players: updatedPlayers,
         currentRound: nextRound,
         phase: nextPhase,
-        bids: nextBids,
-        tricks: {},
-        bonus: {},
+        bids: nextBids, // Prepare for next round
+        tricks: {}, // Clear for next phase
+        bonus: {}, // Clear for next phase
         globalError: null
     });
 }
@@ -270,6 +310,13 @@ function handleRestartGame() {
 // --- Main Render Function ---
 function renderApp() {
     let componentHTML = '';
+    let scoreBoardHTML = '';
+
+    // Render scoreboard from bidding phase onwards, unless it's the complete phase
+    // where the ScoreBoard is the primary component.
+    if (gameState.phase !== 'setup' && gameState.phase !== 'complete') {
+        scoreBoardHTML = ScoreBoard(gameState.players, gameState.currentRound, gameState.phase);
+    }
 
     switch (gameState.phase) {
         case 'setup':
@@ -286,7 +333,8 @@ function renderApp() {
             componentHTML = BiddingPhase(
                 gameState.players,
                 gameState.currentRound,
-                gameState.bids
+                gameState.bids,
+                gameState.globalError
             );
             break;
         case 'scoring':
@@ -295,7 +343,8 @@ function renderApp() {
                 gameState.currentRound,
                 gameState.bids,
                 gameState.tricks,
-                gameState.bonus
+                gameState.bonus,
+                gameState.globalError
             );
             break;
         case 'complete':
@@ -311,10 +360,17 @@ function renderApp() {
 
     appRoot.innerHTML = `
         <h1>Skull King Scorekeeper</h1>
+        ${scoreBoardHTML}
         ${componentHTML}
     `;
 
     // Attach event listeners after rendering (important for dynamic content)
+    // ScoreBoard listeners (for restart button) are only relevant if ScoreBoard renders the button,
+    // which happens when phase is 'complete'.
+    if (gameState.phase === 'complete') {
+        attachScoreBoardListeners(handleRestartGame);
+    }
+
     switch (gameState.phase) {
         case 'setup':
             attachPlayerSetupListeners(
@@ -330,9 +386,7 @@ function renderApp() {
         case 'scoring':
             attachScoringPhaseListeners(handleTricksChange, handleBonusChange, handleScoresSubmitted);
             break;
-        case 'complete':
-            attachScoreBoardListeners(handleRestartGame);
-            break;
+        // No special listeners for 'complete' here.
     }
 }
 

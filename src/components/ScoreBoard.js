@@ -24,7 +24,9 @@
  * @returns {string} HTML string for the score board component.
  */
 export function ScoreBoard(players, currentRound, phase) {
-    const rounds = Array.from({ length: currentRound > 10 ? 10 : currentRound }, (_, i) => i + 1);
+    // When game is complete, currentRound will be 11, but we only display up to round 10
+    const displayRoundsCount = currentRound > 10 ? 10 : currentRound;
+    const rounds = Array.from({ length: displayRoundsCount }, (_, i) => i + 1);
     const sortedPlayers = [...players].sort((a, b) => b.totalScore - a.totalScore);
 
     const isGameComplete = phase === 'complete';
@@ -57,13 +59,16 @@ export function ScoreBoard(players, currentRound, phase) {
                             <td class="total-score">${player.totalScore}</td>
                             ${rounds.map(r => {
                                 const roundScore = player.roundScores.find(rs => rs.round === r);
+                                // For the current round being scored, its data might not be fully confirmed yet.
+                                // If the game is not complete, and this is the current round number (even if in 'scoring' phase)
+                                // we can highlight it.
+                                const isCurrentRoundDisplay = r === currentRound && !isGameComplete;
                                 if (roundScore) {
-                                    const isCurrentRound = r === currentRound && !isGameComplete;
                                     return `
-                                        <td class="score-history-row ${isCurrentRound ? 'current-round-score' : ''}">
+                                        <td class="score-history-row ${isCurrentRoundDisplay ? 'current-round-score' : ''}">
                                             ${roundScore.bid}/${roundScore.tricksTaken}
                                         </td>
-                                        <td class="score-history-row ${isCurrentRound ? 'current-round-score' : ''}">
+                                        <td class="score-history-row ${isCurrentRoundDisplay ? 'current-round-score' : ''}">
                                             ${roundScore.totalRoundScore >= 0 ? '+' : ''}${roundScore.totalRoundScore}
                                         </td>
                                     `;
